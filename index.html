@@ -190,11 +190,13 @@
       <div id="corsOptions" style="display:none; margin-top:8px;">
         <label style="font-size:11px;">Proxy URL (your request is routed through this)</label>
         <select id="corsProxy" style="font-size:12px;">
-          <option value="https://corsproxy.io/?url=">corsproxy.io (recommended)</option>
-          <option value="https://api.allorigins.win/raw?url=">allorigins.win</option>
+          <option value="corsproxy" selected>corsproxy.io</option>
+          <option value="allorigins">allorigins.win</option>
+          <option value="corsanywhere">cors-anywhere (if self-hosted)</option>
           <option value="custom">Custom proxy URL</option>
         </select>
-        <input type="text" id="customProxy" placeholder="https://your-proxy.com/?url=" style="display:none; margin-top:6px; font-size:12px;">
+        <input type="text" id="customProxy" placeholder="https://your-cors-proxy.herokuapp.com/" style="display:none; margin-top:6px; font-size:12px;">
+        <div style="font-size:11px; color:var(--muted); margin-top:6px;">If proxies don't work, use the <strong>Generate Python Script</strong> button below — it runs locally with no CORS restrictions.</div>
       </div>
     </div>
   </div>
@@ -218,6 +220,7 @@
       <button class="btn-run" id="runBtn">Run all requests</button>
       <button class="btn-stop" id="stopBtn" style="display:none;">Stop</button>
       <button class="btn-ghost btn-sm" id="exportBtn" style="display:none;">Export results CSV</button>
+      <button class="btn-ghost btn-sm" id="scriptBtn" style="background:var(--warn-bg); border-color:var(--warn);">⬇ Download & Run Locally (no CORS)</button>
     </div>
     <div class="progress-bar" id="progressBar" style="display:none;"><div class="progress-fill" id="progressFill"></div></div>
     <div class="stats" id="stats" style="display:none;">
@@ -343,11 +346,14 @@
     document.getElementById('customProxy').style.display = this.value === 'custom' ? '' : 'none';
   });
 
-  function getProxyUrl() {
-    if (!document.getElementById('useCors').checked) return '';
+  function buildProxiedUrl(endpoint) {
+    if (!document.getElementById('useCors').checked) return endpoint;
     var sel = document.getElementById('corsProxy').value;
-    if (sel === 'custom') return document.getElementById('customProxy').value.trim();
-    return sel;
+    if (sel === 'corsproxy') return 'https://corsproxy.io/?' + encodeURIComponent(endpoint);
+    if (sel === 'allorigins') return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(endpoint);
+    if (sel === 'corsanywhere') return 'https://cors-anywhere.herokuapp.com/' + endpoint;
+    if (sel === 'custom') return document.getElementById('customProxy').value.trim() + endpoint;
+    return endpoint;
   }
 
   // Run
@@ -363,8 +369,7 @@
     var endpoint = document.getElementById('endpoint').value.trim();
     if (!endpoint) { alert('Enter an endpoint URL.'); running = false; return; }
 
-    var proxyPrefix = getProxyUrl();
-    var finalEndpoint = proxyPrefix ? proxyPrefix + encodeURIComponent(endpoint) : endpoint;
+    var finalEndpoint = buildProxiedUrl(endpoint);
 
     var method = document.getElementById('method').value;
     var headersText = document.getElementById('headers').value.trim();
@@ -478,6 +483,145 @@
     a.href = URL.createObjectURL(blob);
     a.download = 'api-results-' + new Date().toISOString().slice(0,10) + '.csv';
     a.click();
+  }
+
+  // Generate local runner script (no CORS, no installation needed)
+  document.getElementById('scriptBtn').addEventListener('click', generateScript);
+
+  function generateScript() {
+    if (!data.length) { alert('Upload a file first.'); return; }
+    var endpoint = document.getElementById('endpoint').value.trim();
+    if (!endpoint) { alert('Enter an endpoint URL.'); return; }
+    var method = document.getElementById('method').value;
+    var headersText = document.getElementById('headers').value.trim();
+    var reqHeaders = {};
+    try { reqHeaders = headersText ? JSON.parse(headersText) : {}; } catch(e) { alert('Invalid headers JSON.'); return; }
+    var delay = parseInt(document.getElementById('delay').value) || 200;
+
+    var allRows = [];
+    for (var i = 0; i < data.length; i++) { allRows.push(buildRow(i)); }
+
+    // Build PowerShell script (works on every Windows 10/11 machine, no install)
+    var ps = '$ErrorActionPreference = "Continue"\n';
+    ps += '$results = @()\n';
+    ps += '$ok = 0; $fail = 0; $total = ' + allRows.length + '\n';
+    ps += '$outFile = "api-results-" + (Get-Date -Format "yyyy-MM-dd_HHmmss") + ".csv"\n\n';
+    ps += 'Write-Host "============================================================" -ForegroundColor Cyan\n';
+    ps += 'Write-Host "  Bulk API Runner — $total requests" -ForegroundColor Cyan\n';
+    ps += 'Write-Host "  Endpoint: ' + endpoint.replace(/'/g, "''") + '" -ForegroundColor Cyan\n';
+    ps += 'Write-Host "============================================================" -ForegroundColor Cyan\n';
+    ps += 'Write-Host ""\n\n';
+
+    // Headers
+    ps += '$headers = @{\n';
+    Object.keys(reqHeaders).forEach(function(k) {
+      ps += '    "' + k.replace(/"/g, '`"') + '" = "' + reqHeaders[k].replace(/"/g, '`"') + '"\n';
+    });
+    ps += '}\n\n';
+
+    // All row payloads as JSON strings
+    ps += '$payloads = @(\n';
+    allRows.forEach(function(row, i) {
+      var jsonStr = JSON.stringify(row).replace(/'/g, "''").replace(/"/g, '`"');
+      ps += '    \'' + JSON.stringify(row).replace(/'/g, "''") + '\'' + (i < allRows.length - 1 ? ',' : '') + '\n';
+    });
+    ps += ')\n\n';
+
+    ps += 'for ($i = 0; $i -lt $payloads.Count; $i++) {\n';
+    ps += '    $row = $i + 1\n';
+    ps += '    $body = $payloads[$i]\n';
+    ps += '    try {\n';
+    ps += '        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()\n';
+    if (method === 'GET' || method === 'DELETE') {
+      ps += '        $resp = Invoke-WebRequest -Uri "' + endpoint + '" -Method ' + method + ' -Headers $headers -UseBasicParsing\n';
+    } else {
+      ps += '        $resp = Invoke-WebRequest -Uri "' + endpoint + '" -Method ' + method + ' -Headers $headers -Body $body -ContentType "application/json" -UseBasicParsing\n';
+    }
+    ps += '        $stopwatch.Stop()\n';
+    ps += '        $elapsed = [math]::Round($stopwatch.Elapsed.TotalSeconds, 2)\n';
+    ps += '        $code = $resp.StatusCode\n';
+    ps += '        $respBody = $resp.Content\n';
+    ps += '        if ($code -ge 200 -and $code -lt 300) { $status = "ok"; $ok++ } else { $status = "fail"; $fail++ }\n';
+    ps += '        $icon = if ($status -eq "ok") { "OK " } else { "FAIL" }\n';
+    ps += '        $short = $respBody.Substring(0, [Math]::Min(80, $respBody.Length)) -replace "`n", " "\n';
+    ps += '        Write-Host "  [$row/$total] $icon | $code | ${elapsed}s | $short" -ForegroundColor $(if ($status -eq "ok") { "Green" } else { "Red" })\n';
+    ps += '    } catch {\n';
+    ps += '        $stopwatch.Stop()\n';
+    ps += '        $elapsed = [math]::Round($stopwatch.Elapsed.TotalSeconds, 2)\n';
+    ps += '        $status = "fail"; $fail++\n';
+    ps += '        $code = "ERR"\n';
+    ps += '        $respBody = $_.Exception.Message\n';
+    ps += '        if ($_.Exception.Response) {\n';
+    ps += '            $code = [int]$_.Exception.Response.StatusCode\n';
+    ps += '            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())\n';
+    ps += '            $respBody = $reader.ReadToEnd()\n';
+    ps += '            $reader.Close()\n';
+    ps += '        }\n';
+    ps += '        $short = $respBody.Substring(0, [Math]::Min(80, $respBody.Length)) -replace "`n", " "\n';
+    ps += '        Write-Host "  [$row/$total] FAIL | $code | ${elapsed}s | $short" -ForegroundColor Red\n';
+    ps += '    }\n\n';
+    ps += '    $results += [PSCustomObject]@{\n';
+    ps += '        Row = $row\n';
+    ps += '        Status = $status\n';
+    ps += '        HTTP_Code = $code\n';
+    ps += '        Time_Seconds = $elapsed\n';
+    ps += '        Request_JSON = $body\n';
+    ps += '        Response_Body = $respBody\n';
+    ps += '    }\n\n';
+    ps += '    if ($i -lt $payloads.Count - 1) { Start-Sleep -Milliseconds ' + delay + ' }\n';
+    ps += '}\n\n';
+    ps += 'Write-Host ""\n';
+    ps += 'Write-Host "============================================================" -ForegroundColor Cyan\n';
+    ps += 'Write-Host "  DONE: $ok success, $fail failed out of $total" -ForegroundColor $(if ($fail -eq 0) { "Green" } else { "Yellow" })\n';
+    ps += '$results | Export-Csv -Path $outFile -NoTypeInformation -Encoding UTF8\n';
+    ps += 'Write-Host "  Results saved to: $outFile" -ForegroundColor Cyan\n';
+    ps += 'Write-Host "============================================================" -ForegroundColor Cyan\n';
+    ps += 'Write-Host ""\n';
+    ps += 'Read-Host "Press Enter to exit"\n';
+
+    // Wrap in a .bat launcher that calls PowerShell (double-click friendly)
+    var bat = '@echo off\n';
+    bat += 'echo.\n';
+    bat += 'echo  Bulk API Runner - Starting...\n';
+    bat += 'echo.\n';
+    bat += 'powershell -ExecutionPolicy Bypass -Command "& {' + ps.replace(/"/g, '\\"').replace(/%/g, '%%').replace(/\n/g, '; ') + '}"\n';
+
+    // The bat approach with inline PS is fragile for complex scripts. 
+    // Better: save .ps1 alongside and launch it.
+    // Let's use a simpler approach: download .ps1 and a .bat launcher
+
+    // Save PS1 file
+    var ps1Blob = new Blob([ps], { type: 'text/plain' });
+    var batContent = '@echo off\r\necho.\r\necho   Bulk API Runner — Starting...\r\necho.\r\npowershell -ExecutionPolicy Bypass -File "%~dp0bulk_runner.ps1"\r\n';
+    var batBlob = new Blob([batContent], { type: 'text/plain' });
+
+    // Create a zip with both files
+    // Actually, simpler: just download the PS1 and tell user to right-click > Run with PowerShell
+    // OR download both files
+
+    // Simplest: download just the .ps1 with instructions embedded
+    var finalPs = '# Bulk API Runner — Generated by the Bulk API Runner tool\n';
+    finalPs += '# HOW TO RUN: Right-click this file > "Run with PowerShell"\n';
+    finalPs += '# Or open PowerShell, cd to this folder, and type: .\\bulk_runner.ps1\n';
+    finalPs += '# Results CSV is saved in the same folder.\n\n';
+    finalPs += ps;
+
+    var blob1 = new Blob([finalPs], { type: 'text/plain' });
+    var a1 = document.createElement('a');
+    a1.href = URL.createObjectURL(blob1);
+    a1.download = 'bulk_runner.ps1';
+    a1.click();
+
+    // Also download the .bat launcher
+    setTimeout(function() {
+      var blob2 = new Blob([batContent], { type: 'text/plain' });
+      var a2 = document.createElement('a');
+      a2.href = URL.createObjectURL(blob2);
+      a2.download = 'RUN_bulk_runner.bat';
+      a2.click();
+    }, 500);
+
+    alert('2 files downloading:\\n\\n1. RUN_bulk_runner.bat — double-click this to run\\n2. bulk_runner.ps1 — the actual script\\n\\nPut both files in the same folder and double-click the .bat file. No installation needed.');
   }
 
   function esc(s) {
