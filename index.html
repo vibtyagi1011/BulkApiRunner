@@ -181,6 +181,22 @@
         <textarea class="code" id="staticBody" placeholder='{"form_id": 19387}' style="min-height:60px;"></textarea>
       </div>
     </div>
+    <div style="margin-top:10px; padding:10px 12px; background:var(--warn-bg); border-radius:8px; border:1px solid var(--border);">
+      <label style="margin-bottom:6px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+        <input type="checkbox" id="useCors" style="width:auto;">
+        <span style="font-size:12px; font-weight:700; color:var(--text);">Enable CORS Proxy</span>
+        <span style="font-size:11px; color:var(--muted); font-weight:400;">— turn this on if you see "Failed to fetch" errors (required when the API server blocks browser requests)</span>
+      </label>
+      <div id="corsOptions" style="display:none; margin-top:8px;">
+        <label style="font-size:11px;">Proxy URL (your request is routed through this)</label>
+        <select id="corsProxy" style="font-size:12px;">
+          <option value="https://corsproxy.io/?url=">corsproxy.io (recommended)</option>
+          <option value="https://api.allorigins.win/raw?url=">allorigins.win</option>
+          <option value="custom">Custom proxy URL</option>
+        </select>
+        <input type="text" id="customProxy" placeholder="https://your-proxy.com/?url=" style="display:none; margin-top:6px; font-size:12px;">
+      </div>
+    </div>
   </div>
 
   <!-- STEP 3: COLUMN MAPPING -->
@@ -319,6 +335,21 @@
     updatePreview();
   }
 
+  // CORS proxy toggle
+  document.getElementById('useCors').addEventListener('change', function() {
+    document.getElementById('corsOptions').style.display = this.checked ? '' : 'none';
+  });
+  document.getElementById('corsProxy').addEventListener('change', function() {
+    document.getElementById('customProxy').style.display = this.value === 'custom' ? '' : 'none';
+  });
+
+  function getProxyUrl() {
+    if (!document.getElementById('useCors').checked) return '';
+    var sel = document.getElementById('corsProxy').value;
+    if (sel === 'custom') return document.getElementById('customProxy').value.trim();
+    return sel;
+  }
+
   // Run
   document.getElementById('runBtn').addEventListener('click', startRun);
   document.getElementById('stopBtn').addEventListener('click', function() { stopRequested = true; });
@@ -331,6 +362,9 @@
 
     var endpoint = document.getElementById('endpoint').value.trim();
     if (!endpoint) { alert('Enter an endpoint URL.'); running = false; return; }
+
+    var proxyPrefix = getProxyUrl();
+    var finalEndpoint = proxyPrefix ? proxyPrefix + encodeURIComponent(endpoint) : endpoint;
 
     var method = document.getElementById('method').value;
     var headersText = document.getElementById('headers').value.trim();
@@ -367,7 +401,7 @@
           fetchOpts.body = JSON.stringify(rowData);
         }
 
-        var resp = await fetch(endpoint, fetchOpts);
+        var resp = await fetch(finalEndpoint, fetchOpts);
         var elapsed = ((performance.now() - start) / 1000).toFixed(2);
         var bodyText = '';
         try { bodyText = await resp.text(); } catch(e) { bodyText = '(could not read body)'; }
@@ -428,14 +462,21 @@
 
   function exportResults() {
     if (!results.length) return;
-    var csv = 'Row,Status,Code,Time,Response\n';
+    var csv = 'Row,Status,HTTP Code,Response Time,Request JSON,Full API Response\n';
     results.forEach(function(r) {
-      csv += r.row + ',' + r.status + ',' + r.code + ',' + r.time + ',"' + r.body.replace(/"/g, '""').substring(0, 500) + '"\n';
+      var reqJson = '';
+      try { reqJson = JSON.stringify(buildRow(r.row - 1)); } catch(e) { reqJson = ''; }
+      csv += r.row + ',' +
+        r.status + ',' +
+        r.code + ',' +
+        r.time + ',' +
+        '"' + reqJson.replace(/"/g, '""') + '",' +
+        '"' + r.body.replace(/"/g, '""') + '"\n';
     });
-    var blob = new Blob([csv], { type: 'text/csv' });
+    var blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'api-results.csv';
+    a.download = 'api-results-' + new Date().toISOString().slice(0,10) + '.csv';
     a.click();
   }
 
