@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bulk API Runner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --navy: #0B1E3F;
+    --navy2: #152D54;
+    --teal: #0F7B6F;
+    --teal-light: #E6F5F3;
+    --orange: #F0861F;
+    --text: #1F2937;
+    --muted: #6B7280;
+    --border: #D7DEEA;
+    --bg: #F5F7FB;
+    --surface: #FFFFFF;
+    --code-bg: #0F2647;
+    --code-text: #DCE6FA;
+    --ok: #059669;
+    --ok-bg: #ECFDF5;
+    --fail: #DC2626;
+    --fail-bg: #FEF2F2;
+    --warn: #D97706;
+    --warn-bg: #FFFBEB;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --navy: #C9D8FC; --navy2: #1A3158; --teal: #4ED08C; --teal-light: #0D2A26;
+      --text: #E7ECF7; --muted: #96A2BE; --border: #2A3654; --bg: #0A0F1E;
+      --surface: #111A30; --code-bg: #0A1730; --code-text: #CFDCF6;
+      --ok: #4ED08C; --ok-bg: #0D2E1F; --fail: #F87171; --fail-bg: #2D1515;
+      --warn: #FBBF24; --warn-bg: #2D2510;
+    }
+  }
+  :root[data-theme="dark"] {
+    --navy: #C9D8FC; --navy2: #1A3158; --teal: #4ED08C; --teal-light: #0D2A26;
+    --text: #E7ECF7; --muted: #96A2BE; --border: #2A3654; --bg: #0A0F1E;
+    --surface: #111A30; --code-bg: #0A1730; --code-text: #CFDCF6;
+    --ok: #4ED08C; --ok-bg: #0D2E1F; --fail: #F87171; --fail-bg: #2D1515;
+    --warn: #FBBF24; --warn-bg: #2D2510;
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 24px 20px 60px; }
+
+  header { margin-bottom: 20px; }
+  h1 { margin: 0 0 4px; font-size: 24px; font-weight: 800; color: var(--teal); }
+  .sub { margin: 0; color: var(--muted); font-size: 13.5px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+  .card h2 { margin: 0 0 12px; font-size: 14px; font-weight: 700; color: var(--navy); display: flex; align-items: center; gap: 8px; }
+  .step { background: var(--teal); color: #fff; font-size: 11px; font-weight: 700; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--navy); margin-bottom: 4px; }
+  input, select, textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 13px; background: var(--surface); color: var(--text); font-family: inherit;
+  }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  textarea.code {
+    font-family: Consolas, 'SFMono-Regular', Menlo, monospace; font-size: 12px;
+    background: var(--code-bg); color: var(--code-text); min-height: 100px; resize: vertical;
+  }
+
+  .drop-zone {
+    border: 2px dashed var(--border); border-radius: 10px; padding: 32px 20px; text-align: center;
+    cursor: pointer; transition: border-color 0.2s, background 0.2s;
+  }
+  .drop-zone:hover, .drop-zone.dragover { border-color: var(--teal); background: var(--teal-light); }
+  .drop-zone p { margin: 0; color: var(--muted); font-size: 13px; }
+  .drop-zone .icon { font-size: 28px; margin-bottom: 6px; }
+  .file-info { margin-top: 8px; font-size: 12px; color: var(--teal); font-weight: 600; }
+
+  .data-preview { overflow-x: auto; margin-top: 10px; max-height: 260px; overflow-y: auto; }
+  .data-preview table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .data-preview th { background: var(--navy2); color: #fff; padding: 7px 8px; text-align: left; position: sticky; top: 0; font-size: 11px; }
+  .data-preview td { padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+  .data-preview tr:nth-child(even) td { background: var(--teal-light); }
+
+  .header-map { display: grid; grid-template-columns: 1fr 20px 1fr; gap: 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .header-map:last-child { border-bottom: none; }
+  .header-map .arrow { text-align: center; color: var(--muted); font-size: 14px; }
+  .header-map input { font-size: 12px; padding: 6px 8px; }
+  .header-map .col-name { font-size: 12px; color: var(--navy); font-weight: 600; padding: 6px 0; }
+
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+  button { font-family: inherit; font-size: 13px; font-weight: 700; border-radius: 7px; padding: 9px 18px; cursor: pointer; border: 1px solid transparent; }
+  .btn-run { background: var(--teal); color: #fff; }
+  .btn-run:hover { filter: brightness(1.08); }
+  .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-stop { background: var(--fail); color: #fff; }
+  .btn-ghost { background: transparent; color: var(--navy); border-color: var(--border); }
+  .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+  .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin: 10px 0; }
+  .progress-fill { height: 100%; background: var(--teal); border-radius: 3px; transition: width 0.3s; }
+
+  .stats { display: flex; gap: 16px; font-size: 13px; margin: 8px 0; flex-wrap: wrap; }
+  .stat { padding: 4px 10px; border-radius: 6px; font-weight: 700; }
+  .stat-ok { background: var(--ok-bg); color: var(--ok); }
+  .stat-fail { background: var(--fail-bg); color: var(--fail); }
+  .stat-pending { background: var(--warn-bg); color: var(--warn); }
+
+  .results-table { overflow-x: auto; max-height: 400px; overflow-y: auto; }
+  .results-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .results-table th { background: var(--navy2); color: #fff; padding: 7px 8px; text-align: left; position: sticky; top: 0; font-size: 11px; }
+  .results-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .results-table .status-ok { color: var(--ok); font-weight: 700; }
+  .results-table .status-fail { color: var(--fail); font-weight: 700; }
+  .results-table .status-pending { color: var(--warn); }
+  .results-table .resp-body { max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; font-family: monospace; font-size: 11px; }
+  .results-table .resp-body:hover { white-space: normal; word-break: break-all; }
+
+  .delay-input { width: 70px; display: inline-block; }
+  .concurrency-input { width: 70px; display: inline-block; }
+
+  footer { text-align: center; color: var(--muted); font-size: 11px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Bulk API Runner</h1>
+    <p class="sub">Upload an Excel or CSV file, map columns to JSON keys, and fire API calls row by row — like Postman's Collection Runner, but from a spreadsheet.</p>
+  </header>
+
+  <!-- STEP 1: FILE UPLOAD -->
+  <div class="card">
+    <h2><span class="step">1</span> Upload data file</h2>
+    <div class="drop-zone" id="dropZone">
+      <div class="icon">📄</div>
+      <p>Drop .xlsx, .xls, or .csv file here, or click to browse</p>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden>
+      <div class="file-info" id="fileInfo"></div>
+    </div>
+    <div class="data-preview" id="dataPreview" style="display:none;"></div>
+  </div>
+
+  <!-- STEP 2: API CONFIG -->
+  <div class="card">
+    <h2><span class="step">2</span> API configuration</h2>
+    <div class="grid2">
+      <div>
+        <label>Method</label>
+        <select id="method">
+          <option value="POST" selected>POST</option>
+          <option value="PUT">PUT</option>
+          <option value="PATCH">PATCH</option>
+          <option value="GET">GET</option>
+          <option value="DELETE">DELETE</option>
+        </select>
+      </div>
+      <div>
+        <label>Endpoint URL</label>
+        <input type="url" id="endpoint" placeholder="https://api.nopaperforms.io/application/v1/list">
+      </div>
+    </div>
+    <div style="margin-top:10px;">
+      <label>Headers (JSON)</label>
+      <textarea class="code" id="headers" placeholder='{"Content-Type": "application/json", "secret-key": "your-key", "access-key": "your-key"}'>{
+  "Content-Type": "application/json"
+}</textarea>
+    </div>
+    <div class="grid2" style="margin-top:10px;">
+      <div>
+        <label>Delay between requests (ms)</label>
+        <input type="number" id="delay" value="200" min="0" max="10000" class="delay-input">
+      </div>
+      <div>
+        <label>Static JSON body (merged with each row)</label>
+        <textarea class="code" id="staticBody" placeholder='{"form_id": 19387}' style="min-height:60px;"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: COLUMN MAPPING -->
+  <div class="card" id="mappingCard" style="display:none;">
+    <h2><span class="step">3</span> Column → JSON key mapping</h2>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Each Excel column maps to a JSON key. Edit the right side to rename keys. Leave blank to skip a column.</p>
+    <div id="mappingList"></div>
+  </div>
+
+  <!-- STEP 4: RUN -->
+  <div class="card" id="runCard" style="display:none;">
+    <h2><span class="step">4</span> Run</h2>
+    <div style="font-size:13px;margin-bottom:8px;">
+      <span id="rowCount"></span> rows ready.
+      JSON preview for row 1:
+    </div>
+    <textarea class="code" id="jsonPreview" readonly style="min-height:80px;"></textarea>
+    <div class="actions" style="margin-top:10px;">
+      <button class="btn-run" id="runBtn">Run all requests</button>
+      <button class="btn-stop" id="stopBtn" style="display:none;">Stop</button>
+      <button class="btn-ghost btn-sm" id="exportBtn" style="display:none;">Export results CSV</button>
+    </div>
+    <div class="progress-bar" id="progressBar" style="display:none;"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="stats" id="stats" style="display:none;">
+      <span class="stat stat-ok" id="statOk">0 success</span>
+      <span class="stat stat-fail" id="statFail">0 failed</span>
+      <span class="stat stat-pending" id="statPending">0 pending</span>
+    </div>
+    <div class="results-table" id="resultsTable" style="display:none;"></div>
+  </div>
+
+  <footer>Runs entirely in your browser. API calls go directly from your machine to the endpoint — nothing is proxied or stored.</footer>
+</div>
+
+<script>
+(function() {
+  var data = [], headers = [], jsonKeys = [];
+  var running = false, stopRequested = false;
+  var results = [];
+
+  var dropZone = document.getElementById('dropZone');
+  var fileInput = document.getElementById('fileInput');
+  var fileInfo = document.getElementById('fileInfo');
+  var dataPreview = document.getElementById('dataPreview');
+  var mappingCard = document.getElementById('mappingCard');
+  var mappingList = document.getElementById('mappingList');
+  var runCard = document.getElementById('runCard');
+
+  // File upload
+  dropZone.addEventListener('click', function() { fileInput.click(); });
+  dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('dragover'); });
+  dropZone.addEventListener('drop', function(e) { e.preventDefault(); dropZone.classList.remove('dragover'); handleFile(e.dataTransfer.files[0]); });
+  fileInput.addEventListener('change', function() { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+  function handleFile(file) {
+    if (!file) return;
+    fileInfo.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        var wb = XLSX.read(e.target.result, { type: 'array' });
+        var sheet = wb.Sheets[wb.SheetNames[0]];
+        var json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        if (!json.length) { alert('No data found in file.'); return; }
+        data = json;
+        headers = Object.keys(json[0]);
+        jsonKeys = headers.map(function(h) { return h.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase(); });
+        showPreview();
+        showMapping();
+        showRunCard();
+      } catch (err) { alert('Error reading file: ' + err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function showPreview() {
+    var maxRows = Math.min(data.length, 10);
+    var html = '<table><tr>';
+    headers.forEach(function(h) { html += '<th>' + esc(h) + '</th>'; });
+    html += '</tr>';
+    for (var i = 0; i < maxRows; i++) {
+      html += '<tr>';
+      headers.forEach(function(h) { html += '<td>' + esc(String(data[i][h] || '')) + '</td>'; });
+      html += '</tr>';
+    }
+    html += '</table>';
+    if (data.length > 10) html += '<div style="font-size:11px;color:var(--muted);padding:6px;">Showing 10 of ' + data.length + ' rows</div>';
+    dataPreview.innerHTML = html;
+    dataPreview.style.display = '';
+  }
+
+  function showMapping() {
+    var html = '';
+    for (var i = 0; i < headers.length; i++) {
+      html += '<div class="header-map">' +
+        '<div class="col-name">' + esc(headers[i]) + '</div>' +
+        '<div class="arrow">→</div>' +
+        '<input type="text" value="' + esc(jsonKeys[i]) + '" data-idx="' + i + '" class="json-key-input">' +
+        '</div>';
+    }
+    mappingList.innerHTML = html;
+    mappingCard.style.display = '';
+
+    document.querySelectorAll('.json-key-input').forEach(function(inp) {
+      inp.addEventListener('input', function() {
+        jsonKeys[parseInt(this.getAttribute('data-idx'))] = this.value;
+        updatePreview();
+      });
+    });
+  }
+
+  function buildRow(rowIdx) {
+    var obj = {};
+    // Static body first
+    var staticText = document.getElementById('staticBody').value.trim();
+    if (staticText) {
+      try { obj = JSON.parse(staticText); } catch(e) {}
+    }
+    for (var i = 0; i < headers.length; i++) {
+      var key = jsonKeys[i];
+      if (!key || !key.trim()) continue;
+      obj[key.trim()] = data[rowIdx][headers[i]];
+    }
+    return obj;
+  }
+
+  function updatePreview() {
+    if (!data.length) return;
+    document.getElementById('jsonPreview').value = JSON.stringify(buildRow(0), null, 2);
+  }
+
+  function showRunCard() {
+    runCard.style.display = '';
+    document.getElementById('rowCount').textContent = data.length;
+    updatePreview();
+  }
+
+  // Run
+  document.getElementById('runBtn').addEventListener('click', startRun);
+  document.getElementById('stopBtn').addEventListener('click', function() { stopRequested = true; });
+  document.getElementById('exportBtn').addEventListener('click', exportResults);
+
+  async function startRun() {
+    if (running) return;
+    running = true; stopRequested = false;
+    results = [];
+
+    var endpoint = document.getElementById('endpoint').value.trim();
+    if (!endpoint) { alert('Enter an endpoint URL.'); running = false; return; }
+
+    var method = document.getElementById('method').value;
+    var headersText = document.getElementById('headers').value.trim();
+    var reqHeaders = {};
+    try { reqHeaders = headersText ? JSON.parse(headersText) : {}; } catch(e) { alert('Invalid headers JSON.'); running = false; return; }
+
+    var delay = parseInt(document.getElementById('delay').value) || 0;
+    var total = data.length;
+
+    document.getElementById('runBtn').disabled = true;
+    document.getElementById('stopBtn').style.display = '';
+    document.getElementById('exportBtn').style.display = 'none';
+    document.getElementById('progressBar').style.display = '';
+    document.getElementById('stats').style.display = '';
+
+    var tableHtml = '<table><tr><th>#</th><th>Status</th><th>Code</th><th>Time</th><th>Response</th></tr></table>';
+    document.getElementById('resultsTable').innerHTML = tableHtml;
+    document.getElementById('resultsTable').style.display = '';
+    var tbody = document.getElementById('resultsTable').querySelector('table');
+
+    var okCount = 0, failCount = 0;
+    updateStats(okCount, failCount, total);
+
+    for (var i = 0; i < total; i++) {
+      if (stopRequested) break;
+
+      var rowData = buildRow(i);
+      var start = performance.now();
+      var result = { row: i + 1, status: 'pending', code: '', time: '', body: '' };
+
+      try {
+        var fetchOpts = { method: method, headers: reqHeaders };
+        if (method !== 'GET' && method !== 'DELETE') {
+          fetchOpts.body = JSON.stringify(rowData);
+        }
+
+        var resp = await fetch(endpoint, fetchOpts);
+        var elapsed = ((performance.now() - start) / 1000).toFixed(2);
+        var bodyText = '';
+        try { bodyText = await resp.text(); } catch(e) { bodyText = '(could not read body)'; }
+
+        result.code = resp.status;
+        result.time = elapsed + 's';
+        result.body = bodyText;
+        result.status = (resp.status >= 200 && resp.status < 300) ? 'ok' : 'fail';
+
+        if (result.status === 'ok') okCount++; else failCount++;
+      } catch (err) {
+        var elapsed2 = ((performance.now() - start) / 1000).toFixed(2);
+        result.status = 'fail';
+        result.code = 'ERR';
+        result.time = elapsed2 + 's';
+        result.body = err.message;
+        failCount++;
+      }
+
+      results.push(result);
+
+      // Update table
+      var cls = result.status === 'ok' ? 'status-ok' : 'status-fail';
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + result.row + '</td>' +
+        '<td class="' + cls + '">' + (result.status === 'ok' ? '✓' : '✗') + '</td>' +
+        '<td>' + result.code + '</td>' +
+        '<td>' + result.time + '</td>' +
+        '<td class="resp-body" title="Click to expand">' + esc(result.body.substring(0, 200)) + '</td>';
+      tbody.appendChild(tr);
+
+      // Scroll to bottom
+      var rt = document.getElementById('resultsTable');
+      rt.scrollTop = rt.scrollHeight;
+
+      // Update progress
+      var pct = ((i + 1) / total * 100).toFixed(1);
+      document.getElementById('progressFill').style.width = pct + '%';
+      updateStats(okCount, failCount, total - i - 1);
+
+      if (delay > 0 && i < total - 1 && !stopRequested) {
+        await new Promise(function(r) { setTimeout(r, delay); });
+      }
+    }
+
+    running = false;
+    document.getElementById('runBtn').disabled = false;
+    document.getElementById('stopBtn').style.display = 'none';
+    document.getElementById('exportBtn').style.display = '';
+    updateStats(okCount, failCount, 0);
+  }
+
+  function updateStats(ok, fail, pending) {
+    document.getElementById('statOk').textContent = ok + ' success';
+    document.getElementById('statFail').textContent = fail + ' failed';
+    document.getElementById('statPending').textContent = pending + ' pending';
+  }
+
+  function exportResults() {
+    if (!results.length) return;
+    var csv = 'Row,Status,Code,Time,Response\n';
+    results.forEach(function(r) {
+      csv += r.row + ',' + r.status + ',' + r.code + ',' + r.time + ',"' + r.body.replace(/"/g, '""').substring(0, 500) + '"\n';
+    });
+    var blob = new Blob([csv], { type: 'text/csv' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'api-results.csv';
+    a.click();
+  }
+
+  function esc(s) {
+    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+})();
+</script>
+</body>
+</html>
